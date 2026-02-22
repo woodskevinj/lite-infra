@@ -1,0 +1,18 @@
+# Python / CDK
+venv/
+infrastructure/.venv/
+infrastructure/**/__pycache__/
+infrastructure/**/*.pyc
+infrastructure/cdk.out/
+*.egg-info/
+
+# Node
+backend/node_modules/
+frontend/node_modules/
+
+# Environment
+.env
+*.env
+
+# OS
+.DS_Store
