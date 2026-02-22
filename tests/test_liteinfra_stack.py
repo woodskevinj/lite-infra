@@ -159,11 +159,47 @@ def test_alb_listener_has_fixed_response_default():
 
 
 # ---------------------------------------------------------------
+# Target Group
+# ---------------------------------------------------------------
+def test_app_target_group_created():
+    template = get_template()
+    template.has_resource_properties(
+        "AWS::ElasticLoadBalancingV2::TargetGroup",
+        {
+            "Port": 80,
+            "Protocol": "HTTP",
+            "TargetType": "ip",
+            "HealthCheckPath": "/",
+            "HealthCheckIntervalSeconds": 30,
+        },
+    )
+
+
+# ---------------------------------------------------------------
 # ECS Service
 # ---------------------------------------------------------------
 def test_ecs_service_created():
     template = get_template()
     template.resource_count_is("AWS::ECS::Service", 1)
+
+
+def test_ecs_service_linked_to_target_group():
+    template = get_template()
+    template.has_resource_properties(
+        "AWS::ECS::Service",
+        {
+            "LoadBalancers": assertions.Match.array_with(
+                [
+                    assertions.Match.object_like(
+                        {
+                            "ContainerName": "app",
+                            "ContainerPort": 80,
+                        }
+                    ),
+                ]
+            ),
+        },
+    )
 
 
 def test_ecs_service_deployment_config():
@@ -213,3 +249,5 @@ def test_outputs_exist():
     assert any("RdsEndpoint" in k for k in output_keys), "Missing RdsEndpoint output"
     assert any("FrontendEcrUri" in k for k in output_keys), "Missing FrontendEcrUri output"
     assert any("BackendEcrUri" in k for k in output_keys), "Missing BackendEcrUri output"
+    assert any("HttpListenerArn" in k for k in output_keys), "Missing HttpListenerArn output"
+    assert any("AppTargetGroupArn" in k for k in output_keys), "Missing AppTargetGroupArn output"

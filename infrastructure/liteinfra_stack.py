@@ -2,6 +2,7 @@ from aws_cdk import (
     Stack,
     RemovalPolicy,
     CfnOutput,
+    Duration,
     aws_ec2 as ec2,
     aws_rds as rds,
     aws_ecr as ecr,
@@ -161,7 +162,7 @@ class LiteInfraStack(Stack):
             security_group=alb_sg,
         )
 
-        alb.add_listener(
+        listener = alb.add_listener(
             "HttpListener",
             port=80,
             open=False,
@@ -169,6 +170,20 @@ class LiteInfraStack(Stack):
                 503,
                 content_type="text/plain",
                 message_body="Service Unavailable",
+            ),
+        )
+
+        target_group = elbv2.ApplicationTargetGroup(
+            self,
+            "AppTargetGroup",
+            vpc=vpc,
+            port=80,
+            protocol=elbv2.ApplicationProtocol.HTTP,
+            target_type=elbv2.TargetType.IP,
+            health_check=elbv2.HealthCheck(
+                path="/",
+                interval=Duration.seconds(30),
+                healthy_threshold_count=2,
             ),
         )
 
@@ -188,6 +203,13 @@ class LiteInfraStack(Stack):
             assign_public_ip=True,
         )
 
+        target_group.add_target(
+            service.load_balancer_target(
+                container_name="app",
+                container_port=80,
+            )
+        )
+
         # ---------------------------------------------------------------
         # Stack Outputs
         # ---------------------------------------------------------------
@@ -200,3 +222,5 @@ class LiteInfraStack(Stack):
         CfnOutput(self, "RdsEndpoint", value=db_instance.db_instance_endpoint_address)
         CfnOutput(self, "FrontendEcrUri", value=frontend_repo.repository_uri)
         CfnOutput(self, "BackendEcrUri", value=backend_repo.repository_uri)
+        CfnOutput(self, "HttpListenerArn", value=listener.listener_arn)
+        CfnOutput(self, "AppTargetGroupArn", value=target_group.target_group_arn)
