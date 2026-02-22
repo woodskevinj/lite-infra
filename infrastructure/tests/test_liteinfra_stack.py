@@ -1,11 +1,11 @@
 import aws_cdk as cdk
 from aws_cdk import assertions
-from infrastructure.tasktracker_stack import TasktrackerStack
+from infrastructure.liteinfra_stack import LiteInfraStack
 
 
 def get_template():
     app = cdk.App()
-    stack = TasktrackerStack(app, "TestStack", env=cdk.Environment(region="us-east-1"))
+    stack = LiteInfraStack(app, "TestStack", env=cdk.Environment(region="us-east-1"))
     return assertions.Template.from_stack(stack)
 
 
@@ -27,7 +27,7 @@ def test_rds_instance_type_and_engine():
         {
             "DBInstanceClass": "db.t3.micro",
             "Engine": "postgres",
-            "DBName": "tasktracker",
+            "DBName": "appdb",
         },
     )
 
@@ -87,34 +87,22 @@ def test_ecs_cluster_created():
 # ---------------------------------------------------------------
 # ECS Task Definition
 # ---------------------------------------------------------------
-def test_ecs_task_definition_has_two_containers():
+def test_ecs_task_definition_has_single_app_container():
     template = get_template()
     template.has_resource_properties(
         "AWS::ECS::TaskDefinition",
         {
             "RequiresCompatibilities": ["FARGATE"],
             "NetworkMode": "awsvpc",
-            "Cpu": "256",
-            "Memory": "512",
             "ContainerDefinitions": assertions.Match.array_with(
                 [
                     assertions.Match.object_like(
                         {
-                            "Name": "frontend",
+                            "Name": "app",
                             "Image": "nginx:alpine",
-                            "Memory": 256,
+                            "Memory": 512,
                             "PortMappings": [
                                 {"ContainerPort": 80},
-                            ],
-                        }
-                    ),
-                    assertions.Match.object_like(
-                        {
-                            "Name": "backend",
-                            "Image": "node:20-alpine",
-                            "Memory": 256,
-                            "PortMappings": [
-                                {"ContainerPort": 3001},
                             ],
                         }
                     ),
@@ -122,6 +110,18 @@ def test_ecs_task_definition_has_two_containers():
             ),
         },
     )
+
+
+def test_ecs_task_definition_has_exactly_one_container():
+    template = get_template()
+    resources = template.to_json()["Resources"]
+    task_defs = [
+        r for r in resources.values()
+        if r["Type"] == "AWS::ECS::TaskDefinition"
+    ]
+    assert len(task_defs) == 1
+    containers = task_defs[0]["Properties"]["ContainerDefinitions"]
+    assert len(containers) == 1
 
 
 # ---------------------------------------------------------------
@@ -133,6 +133,27 @@ def test_alb_created():
         "AWS::ElasticLoadBalancingV2::LoadBalancer",
         {
             "Scheme": "internet-facing",
+        },
+    )
+
+
+def test_alb_listener_has_fixed_response_default():
+    template = get_template()
+    template.has_resource_properties(
+        "AWS::ElasticLoadBalancingV2::Listener",
+        {
+            "DefaultActions": assertions.Match.array_with(
+                [
+                    assertions.Match.object_like(
+                        {
+                            "Type": "fixed-response",
+                            "FixedResponseConfig": assertions.Match.object_like(
+                                {"StatusCode": "503"}
+                            ),
+                        }
+                    ),
+                ]
+            ),
         },
     )
 
@@ -160,6 +181,21 @@ def test_ecs_service_deployment_config():
     )
 
 
+def test_ecs_security_group_allows_only_port_80_from_alb():
+    template = get_template()
+    resources = template.to_json()["Resources"]
+    sg_ingress_resources = [
+        r["Properties"]
+        for r in resources.values()
+        if r["Type"] == "AWS::EC2::SecurityGroupIngress"
+    ]
+    ports_3001 = [
+        r for r in sg_ingress_resources
+        if r.get("FromPort") == 3001 or r.get("ToPort") == 3001
+    ]
+    assert len(ports_3001) == 0, f"Found unexpected port 3001 ingress rules: {ports_3001}"
+
+
 # ---------------------------------------------------------------
 # Stack Outputs
 # ---------------------------------------------------------------
@@ -168,8 +204,12 @@ def test_outputs_exist():
     outputs = template.to_json()["Outputs"]
     output_keys = list(outputs.keys())
 
+    assert any("VpcId" in k for k in output_keys), "Missing VpcId output"
+    assert any("EcsClusterName" in k for k in output_keys), "Missing EcsClusterName output"
+    assert any("EcsServiceName" in k for k in output_keys), "Missing EcsServiceName output"
     assert any("AlbDnsName" in k for k in output_keys), "Missing AlbDnsName output"
-    assert any("RdsEndpoint" in k for k in output_keys), "Missing RdsEndpoint output"
+    assert any("EcsSecurityGroupId" in k for k in output_keys), "Missing EcsSecurityGroupId output"
     assert any("RdsSecurityGroupId" in k for k in output_keys), "Missing RdsSecurityGroupId output"
+    assert any("RdsEndpoint" in k for k in output_keys), "Missing RdsEndpoint output"
     assert any("FrontendEcrUri" in k for k in output_keys), "Missing FrontendEcrUri output"
     assert any("BackendEcrUri" in k for k in output_keys), "Missing BackendEcrUri output"

@@ -1,11 +1,11 @@
 import aws_cdk as cdk
-from infrastructure.tasktracker_stack import TasktrackerStack
+from infrastructure.liteinfra_stack import LiteInfraStack
 
 app = cdk.App()
 
-TasktrackerStack(
+LiteInfraStack(
     app,
-    "TasktrackerStack",
+    "LiteInfraStack",
     env=cdk.Environment(region="us-east-1"),
 )
 

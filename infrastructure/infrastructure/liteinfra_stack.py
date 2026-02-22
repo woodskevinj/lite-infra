@@ -2,7 +2,6 @@ from aws_cdk import (
     Stack,
     RemovalPolicy,
     CfnOutput,
-    Duration,
     aws_ec2 as ec2,
     aws_rds as rds,
     aws_ecr as ecr,
@@ -12,7 +11,7 @@ from aws_cdk import (
 from constructs import Construct
 
 
-class TasktrackerStack(Stack):
+class LiteInfraStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
@@ -21,7 +20,7 @@ class TasktrackerStack(Stack):
         # ---------------------------------------------------------------
         vpc = ec2.Vpc(
             self,
-            "TasktrackerVpc",
+            "LiteInfraVpc",
             max_azs=2,
             nat_gateways=0,
             subnet_configuration=[
@@ -82,10 +81,7 @@ class TasktrackerStack(Stack):
             allow_all_outbound=True,
         )
         ecs_sg.add_ingress_rule(
-            alb_sg, ec2.Port.tcp(80), "Allow frontend from ALB"
-        )
-        ecs_sg.add_ingress_rule(
-            alb_sg, ec2.Port.tcp(3001), "Allow backend from ALB"
+            alb_sg, ec2.Port.tcp(80), "Allow port 80 from ALB"
         )
 
         rds_sg = ec2.SecurityGroup(
@@ -104,7 +100,7 @@ class TasktrackerStack(Stack):
         # ---------------------------------------------------------------
         db_instance = rds.DatabaseInstance(
             self,
-            "TasktrackerDb",
+            "LiteInfraDb",
             engine=rds.DatabaseInstanceEngine.postgres(
                 version=rds.PostgresEngineVersion.VER_16,
             ),
@@ -116,7 +112,7 @@ class TasktrackerStack(Stack):
                 subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
             ),
             security_groups=[rds_sg],
-            database_name="tasktracker",
+            database_name="appdb",
             publicly_accessible=False,
             removal_policy=RemovalPolicy.DESTROY,
             deletion_protection=False,
@@ -127,65 +123,30 @@ class TasktrackerStack(Stack):
         # ---------------------------------------------------------------
         cluster = ecs.Cluster(
             self,
-            "TasktrackerCluster",
+            "LiteInfraCluster",
             vpc=vpc,
         )
 
         # ---------------------------------------------------------------
-        # ECS Task Definition (2 containers, awsvpc networking)
+        # ECS Task Definition (1 container, awsvpc networking)
         # ---------------------------------------------------------------
         task_definition = ecs.FargateTaskDefinition(
             self,
-            "TasktrackerTaskDef",
+            "LiteInfraTaskDef",
             cpu=256,
             memory_limit_mib=512,
         )
 
-        # Frontend container — uses nginx placeholder until real image is pushed to ECR
         task_definition.add_container(
-            "frontend",
+            "app",
             image=ecs.ContainerImage.from_registry("nginx:alpine"),
-            memory_limit_mib=256,
+            memory_limit_mib=512,
             port_mappings=[
                 ecs.PortMapping(container_port=80),
             ],
-            logging=ecs.LogDrivers.aws_logs(stream_prefix="frontend"),
+            logging=ecs.LogDrivers.aws_logs(stream_prefix="app"),
         )
 
-        # Backend container — uses node placeholder until real image is pushed to ECR.
-        # The command override starts a minimal HTTP server so the container stays
-        # running and the ALB health check passes during initial deployment.
-        task_definition.add_container(
-            "backend",
-            image=ecs.ContainerImage.from_registry("node:20-alpine"),
-            command=[
-                "node", "-e",
-                "require('http').createServer((req,res)=>{res.writeHead(200,{'Content-Type':'application/json'});res.end('[]')}).listen(3001)",
-            ],
-            memory_limit_mib=256,
-            port_mappings=[
-                ecs.PortMapping(container_port=3001),
-            ],
-            environment={
-                "DB_HOST": db_instance.db_instance_endpoint_address,
-                "DB_PORT": db_instance.db_instance_endpoint_port,
-                "DB_NAME": "tasktracker",
-                "PORT": "3001",
-            },
-            secrets={
-                "DB_USER": ecs.Secret.from_secrets_manager(
-                    db_instance.secret, field="username"
-                ),
-                "DB_PASSWORD": ecs.Secret.from_secrets_manager(
-                    db_instance.secret, field="password"
-                ),
-            },
-            logging=ecs.LogDrivers.aws_logs(stream_prefix="backend"),
-        )
-
-        # Grant the task execution role permission to pull from ECR.
-        # The placeholder images (nginx:alpine, node:20-alpine) don't trigger
-        # this automatically, but deploy.sh swaps in ECR image URIs.
         frontend_repo.grant_pull(task_definition.execution_role)
         backend_repo.grant_pull(task_definition.execution_role)
 
@@ -194,16 +155,21 @@ class TasktrackerStack(Stack):
         # ---------------------------------------------------------------
         alb = elbv2.ApplicationLoadBalancer(
             self,
-            "TasktrackerAlb",
+            "LiteInfraAlb",
             vpc=vpc,
             internet_facing=True,
             security_group=alb_sg,
         )
 
-        listener = alb.add_listener(
+        alb.add_listener(
             "HttpListener",
             port=80,
             open=False,
+            default_action=elbv2.ListenerAction.fixed_response(
+                503,
+                content_type="text/plain",
+                message_body="Service Unavailable",
+            ),
         )
 
         # ---------------------------------------------------------------
@@ -211,7 +177,7 @@ class TasktrackerStack(Stack):
         # ---------------------------------------------------------------
         service = ecs.FargateService(
             self,
-            "TasktrackerService",
+            "LiteInfraService",
             cluster=cluster,
             task_definition=task_definition,
             desired_count=1,
@@ -222,71 +188,15 @@ class TasktrackerStack(Stack):
             assign_public_ip=True,
         )
 
-        # Backend target group — /api/* routes
-        listener.add_targets(
-            "BackendTarget",
-            port=3001,
-            protocol=elbv2.ApplicationProtocol.HTTP,
-            targets=[
-                service.load_balancer_target(
-                    container_name="backend",
-                    container_port=3001,
-                ),
-            ],
-            health_check=elbv2.HealthCheck(
-                path="/health",
-                interval=Duration.seconds(10),
-                healthy_threshold_count=2,
-            ),
-            conditions=[
-                elbv2.ListenerCondition.path_patterns(["/api/*"]),
-            ],
-            priority=1,
-        )
-
-        # Frontend target group — default (everything else)
-        listener.add_targets(
-            "FrontendTarget",
-            port=80,
-            targets=[
-                service.load_balancer_target(
-                    container_name="frontend",
-                    container_port=80,
-                ),
-            ],
-            health_check=elbv2.HealthCheck(path="/"),
-        )
-
         # ---------------------------------------------------------------
         # Stack Outputs
         # ---------------------------------------------------------------
-        CfnOutput(
-            self,
-            "AlbDnsName",
-            value=alb.load_balancer_dns_name,
-            description="Application Load Balancer DNS name",
-        )
-        CfnOutput(
-            self,
-            "RdsEndpoint",
-            value=db_instance.db_instance_endpoint_address,
-            description="RDS PostgreSQL endpoint",
-        )
-        CfnOutput(
-            self,
-            "RdsSecurityGroupId",
-            value=rds_sg.security_group_id,
-            description="RDS security group ID",
-        )
-        CfnOutput(
-            self,
-            "FrontendEcrUri",
-            value=frontend_repo.repository_uri,
-            description="Frontend ECR repository URI",
-        )
-        CfnOutput(
-            self,
-            "BackendEcrUri",
-            value=backend_repo.repository_uri,
-            description="Backend ECR repository URI",
-        )
+        CfnOutput(self, "VpcId", value=vpc.vpc_id)
+        CfnOutput(self, "EcsClusterName", value=cluster.cluster_name)
+        CfnOutput(self, "EcsServiceName", value=service.service_name)
+        CfnOutput(self, "AlbDnsName", value=alb.load_balancer_dns_name)
+        CfnOutput(self, "EcsSecurityGroupId", value=ecs_sg.security_group_id)
+        CfnOutput(self, "RdsSecurityGroupId", value=rds_sg.security_group_id)
+        CfnOutput(self, "RdsEndpoint", value=db_instance.db_instance_endpoint_address)
+        CfnOutput(self, "FrontendEcrUri", value=frontend_repo.repository_uri)
+        CfnOutput(self, "BackendEcrUri", value=backend_repo.repository_uri)

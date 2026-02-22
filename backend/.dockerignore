@@ -1,7 +1,0 @@
-node_modules
-__tests__
-.env
-.git
-.gitignore
-jest.config.js
-*.md
