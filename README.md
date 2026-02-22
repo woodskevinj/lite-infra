@@ -35,18 +35,19 @@ App repos read these from the `LiteInfraStack` CloudFormation stack to configure
 
 ```
 lite-infra/
-└── infrastructure/          # AWS CDK app (Python)
-    ├── app.py               # CDK entry point
-    ├── infrastructure/
-    │   └── liteinfra_stack.py
-    └── tests/
-        └── test_liteinfra_stack.py
+├── app.py                   # CDK entry point
+├── cdk.json                 # CDK configuration
+├── requirements.txt
+├── requirements-dev.txt
+├── infrastructure/
+│   └── liteinfra_stack.py
+└── tests/
+    └── test_liteinfra_stack.py
 ```
 
 ## Setup
 
 ```bash
-cd infrastructure
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
@@ -55,7 +56,6 @@ pip install -r requirements-dev.txt
 ## Run Tests
 
 ```bash
-cd infrastructure
 source .venv/bin/activate
 pytest -v
 ```
@@ -65,7 +65,6 @@ pytest -v
 ## Synthesize CloudFormation Template
 
 ```bash
-cd infrastructure
 source .venv/bin/activate
 cdk synth
 ```
@@ -75,7 +74,6 @@ Generates `cdk.out/LiteInfraStack.template.json`.
 ## Deploy
 
 ```bash
-cd infrastructure
 source .venv/bin/activate
 cdk deploy
 ```
@@ -85,6 +83,5 @@ Requires AWS credentials and CDK bootstrap (`cdk bootstrap`).
 ## Tear Down
 
 ```bash
-cd infrastructure
 cdk destroy
 ```

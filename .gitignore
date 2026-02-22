@@ -1,10 +1,10 @@
 # Python / CDK
-venv/
-infrastructure/.venv/
-infrastructure/**/__pycache__/
-infrastructure/**/*.pyc
-infrastructure/cdk.out/
+.venv/
+**/__pycache__/
+**/*.pyc
+cdk.out/
 *.egg-info/
+.pytest_cache/
 
 # Environment
 .env
