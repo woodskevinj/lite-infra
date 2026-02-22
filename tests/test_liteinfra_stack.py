@@ -137,7 +137,7 @@ def test_alb_created():
     )
 
 
-def test_alb_listener_has_fixed_response_default():
+def test_alb_listener_forwards_to_app_target_group():
     template = get_template()
     template.has_resource_properties(
         "AWS::ElasticLoadBalancingV2::Listener",
@@ -146,10 +146,7 @@ def test_alb_listener_has_fixed_response_default():
                 [
                     assertions.Match.object_like(
                         {
-                            "Type": "fixed-response",
-                            "FixedResponseConfig": assertions.Match.object_like(
-                                {"StatusCode": "503"}
-                            ),
+                            "Type": "forward",
                         }
                     ),
                 ]

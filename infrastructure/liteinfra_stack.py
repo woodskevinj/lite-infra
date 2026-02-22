@@ -162,17 +162,6 @@ class LiteInfraStack(Stack):
             security_group=alb_sg,
         )
 
-        listener = alb.add_listener(
-            "HttpListener",
-            port=80,
-            open=False,
-            default_action=elbv2.ListenerAction.fixed_response(
-                503,
-                content_type="text/plain",
-                message_body="Service Unavailable",
-            ),
-        )
-
         target_group = elbv2.ApplicationTargetGroup(
             self,
             "AppTargetGroup",
@@ -185,6 +174,13 @@ class LiteInfraStack(Stack):
                 interval=Duration.seconds(30),
                 healthy_threshold_count=2,
             ),
+        )
+
+        listener = alb.add_listener(
+            "HttpListener",
+            port=80,
+            open=False,
+            default_action=elbv2.ListenerAction.forward([target_group]),
         )
 
         # ---------------------------------------------------------------
