@@ -76,6 +76,14 @@ def test_ecr_repositories_created():
     )
 
 
+def test_visionsense_ecr_repository_created():
+    template = get_template()
+    template.has_resource_properties(
+        "AWS::ECR::Repository",
+        {"RepositoryName": "visionsense-api"},
+    )
+
+
 # ---------------------------------------------------------------
 # ECS Cluster
 # ---------------------------------------------------------------
@@ -246,5 +254,6 @@ def test_outputs_exist():
     assert any("RdsEndpoint" in k for k in output_keys), "Missing RdsEndpoint output"
     assert any("FrontendEcrUri" in k for k in output_keys), "Missing FrontendEcrUri output"
     assert any("BackendEcrUri" in k for k in output_keys), "Missing BackendEcrUri output"
+    assert any("VisionSenseEcrUri" in k for k in output_keys), "Missing VisionSenseEcrUri output"
     assert any("HttpListenerArn" in k for k in output_keys), "Missing HttpListenerArn output"
     assert any("AppTargetGroupArn" in k for k in output_keys), "Missing AppTargetGroupArn output"

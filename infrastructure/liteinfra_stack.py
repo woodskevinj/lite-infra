@@ -57,6 +57,14 @@ class LiteInfraStack(Stack):
             empty_on_delete=True,
         )
 
+        visionsense_repo = ecr.Repository(
+            self,
+            "VisionSenseApiRepo",
+            repository_name="visionsense-api",
+            removal_policy=RemovalPolicy.DESTROY,
+            empty_on_delete=True,
+        )
+
         # ---------------------------------------------------------------
         # Security Groups
         # ---------------------------------------------------------------
@@ -218,5 +226,6 @@ class LiteInfraStack(Stack):
         CfnOutput(self, "RdsEndpoint", value=db_instance.db_instance_endpoint_address)
         CfnOutput(self, "FrontendEcrUri", value=frontend_repo.repository_uri)
         CfnOutput(self, "BackendEcrUri", value=backend_repo.repository_uri)
+        CfnOutput(self, "VisionSenseEcrUri", value=visionsense_repo.repository_uri)
         CfnOutput(self, "HttpListenerArn", value=listener.listener_arn)
         CfnOutput(self, "AppTargetGroupArn", value=target_group.target_group_arn)
