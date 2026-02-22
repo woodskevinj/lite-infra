@@ -120,16 +120,17 @@ def test_ecs_task_definition_has_single_app_container():
     )
 
 
-def test_ecs_task_definition_has_exactly_one_container():
+def test_each_task_definition_has_exactly_one_container():
     template = get_template()
     resources = template.to_json()["Resources"]
     task_defs = [
         r for r in resources.values()
         if r["Type"] == "AWS::ECS::TaskDefinition"
     ]
-    assert len(task_defs) == 1
-    containers = task_defs[0]["Properties"]["ContainerDefinitions"]
-    assert len(containers) == 1
+    assert len(task_defs) == 2
+    for td in task_defs:
+        containers = td["Properties"]["ContainerDefinitions"]
+        assert len(containers) == 1
 
 
 # ---------------------------------------------------------------
@@ -150,15 +151,77 @@ def test_alb_listener_forwards_to_app_target_group():
     template.has_resource_properties(
         "AWS::ElasticLoadBalancingV2::Listener",
         {
+            "Port": 80,
             "DefaultActions": assertions.Match.array_with(
+                [assertions.Match.object_like({"Type": "forward"})]
+            ),
+        },
+    )
+
+
+def test_alb_8080_listener_created():
+    template = get_template()
+    template.has_resource_properties(
+        "AWS::ElasticLoadBalancingV2::Listener",
+        {
+            "Port": 8080,
+            "DefaultActions": assertions.Match.array_with(
+                [assertions.Match.object_like({"Type": "forward"})]
+            ),
+        },
+    )
+
+
+def test_alb_sg_allows_port_8080():
+    template = get_template()
+    template.has_resource_properties(
+        "AWS::EC2::SecurityGroup",
+        {
+            "GroupDescription": "Allow HTTP and HTTPS to ALB",
+            "SecurityGroupIngress": assertions.Match.array_with(
+                [
+                    assertions.Match.object_like(
+                        {"FromPort": 8080, "ToPort": 8080, "IpProtocol": "tcp"}
+                    )
+                ]
+            ),
+        },
+    )
+
+
+def test_visionsense_task_definition_created():
+    template = get_template()
+    template.has_resource_properties(
+        "AWS::ECS::TaskDefinition",
+        {
+            "Family": assertions.Match.string_like_regexp("VisionSense"),
+            "ContainerDefinitions": assertions.Match.array_with(
                 [
                     assertions.Match.object_like(
                         {
-                            "Type": "forward",
+                            "Name": "app",
+                            "Image": "nginx:alpine",
+                            "Memory": 512,
+                            "PortMappings": [{"ContainerPort": 80}],
                         }
-                    ),
+                    )
                 ]
             ),
+        },
+    )
+
+
+def test_visionsense_target_group_created():
+    template = get_template()
+    template.has_resource_properties(
+        "AWS::ElasticLoadBalancingV2::TargetGroup",
+        {
+            "Port": 80,
+            "Protocol": "HTTP",
+            "TargetType": "ip",
+            "HealthCheckPath": "/health",
+            "HealthCheckIntervalSeconds": 30,
+            "Matcher": {"HttpCode": "200"},
         },
     )
 
@@ -185,7 +248,7 @@ def test_app_target_group_created():
 # ---------------------------------------------------------------
 def test_ecs_service_created():
     template = get_template()
-    template.resource_count_is("AWS::ECS::Service", 1)
+    template.resource_count_is("AWS::ECS::Service", 2)
 
 
 def test_ecs_service_linked_to_target_group():
@@ -194,17 +257,23 @@ def test_ecs_service_linked_to_target_group():
         "AWS::ECS::Service",
         {
             "LoadBalancers": assertions.Match.array_with(
-                [
-                    assertions.Match.object_like(
-                        {
-                            "ContainerName": "app",
-                            "ContainerPort": 80,
-                        }
-                    ),
-                ]
+                [assertions.Match.object_like({"ContainerName": "app", "ContainerPort": 80})]
             ),
         },
     )
+
+
+def test_visionsense_service_linked_to_target_group():
+    template = get_template()
+    # Both services use container name "app" port 80 — assert two services
+    # have load balancer config (one per service)
+    resources = template.to_json()["Resources"]
+    services_with_lb = [
+        r for r in resources.values()
+        if r["Type"] == "AWS::ECS::Service"
+        and r.get("Properties", {}).get("LoadBalancers")
+    ]
+    assert len(services_with_lb) == 2
 
 
 def test_ecs_service_deployment_config():
@@ -255,5 +324,6 @@ def test_outputs_exist():
     assert any("FrontendEcrUri" in k for k in output_keys), "Missing FrontendEcrUri output"
     assert any("BackendEcrUri" in k for k in output_keys), "Missing BackendEcrUri output"
     assert any("VisionSenseEcrUri" in k for k in output_keys), "Missing VisionSenseEcrUri output"
+    assert any("VisionSenseEcsServiceName" in k for k in output_keys), "Missing VisionSenseEcsServiceName output"
     assert any("HttpListenerArn" in k for k in output_keys), "Missing HttpListenerArn output"
     assert any("AppTargetGroupArn" in k for k in output_keys), "Missing AppTargetGroupArn output"

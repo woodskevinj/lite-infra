@@ -81,6 +81,9 @@ class LiteInfraStack(Stack):
         alb_sg.add_ingress_rule(
             ec2.Peer.any_ipv4(), ec2.Port.tcp(443), "Allow HTTPS"
         )
+        alb_sg.add_ingress_rule(
+            ec2.Peer.any_ipv4(), ec2.Port.tcp(8080), "Allow port 8080"
+        )
 
         ecs_sg = ec2.SecurityGroup(
             self,
@@ -160,6 +163,28 @@ class LiteInfraStack(Stack):
         backend_repo.grant_pull(task_definition.execution_role)
 
         # ---------------------------------------------------------------
+        # VisionSense Task Definition (1 container, awsvpc networking)
+        # ---------------------------------------------------------------
+        visionsense_task_definition = ecs.FargateTaskDefinition(
+            self,
+            "VisionSenseTaskDef",
+            cpu=256,
+            memory_limit_mib=512,
+        )
+
+        visionsense_task_definition.add_container(
+            "app",
+            image=ecs.ContainerImage.from_registry("nginx:alpine"),
+            memory_limit_mib=512,
+            port_mappings=[
+                ecs.PortMapping(container_port=80),
+            ],
+            logging=ecs.LogDrivers.aws_logs(stream_prefix="visionsense"),
+        )
+
+        visionsense_repo.grant_pull(visionsense_task_definition.execution_role)
+
+        # ---------------------------------------------------------------
         # Application Load Balancer
         # ---------------------------------------------------------------
         alb = elbv2.ApplicationLoadBalancer(
@@ -191,6 +216,29 @@ class LiteInfraStack(Stack):
             default_action=elbv2.ListenerAction.forward([target_group]),
         )
 
+        visionsense_target_group = elbv2.ApplicationTargetGroup(
+            self,
+            "VisionSenseTargetGroup",
+            vpc=vpc,
+            port=80,
+            protocol=elbv2.ApplicationProtocol.HTTP,
+            target_type=elbv2.TargetType.IP,
+            health_check=elbv2.HealthCheck(
+                path="/health",
+                port="80",
+                interval=Duration.seconds(30),
+                healthy_threshold_count=2,
+                healthy_http_codes="200",
+            ),
+        )
+
+        alb.add_listener(
+            "Port8080Listener",
+            port=8080,
+            open=False,
+            default_action=elbv2.ListenerAction.forward([visionsense_target_group]),
+        )
+
         # ---------------------------------------------------------------
         # ECS Service
         # ---------------------------------------------------------------
@@ -215,6 +263,29 @@ class LiteInfraStack(Stack):
         )
 
         # ---------------------------------------------------------------
+        # VisionSense ECS Service
+        # ---------------------------------------------------------------
+        visionsense_service = ecs.FargateService(
+            self,
+            "VisionSenseService",
+            cluster=cluster,
+            task_definition=visionsense_task_definition,
+            desired_count=1,
+            min_healthy_percent=100,
+            max_healthy_percent=200,
+            security_groups=[ecs_sg],
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+            assign_public_ip=True,
+        )
+
+        visionsense_target_group.add_target(
+            visionsense_service.load_balancer_target(
+                container_name="app",
+                container_port=80,
+            )
+        )
+
+        # ---------------------------------------------------------------
         # Stack Outputs
         # ---------------------------------------------------------------
         CfnOutput(self, "VpcId", value=vpc.vpc_id)
@@ -229,3 +300,4 @@ class LiteInfraStack(Stack):
         CfnOutput(self, "VisionSenseEcrUri", value=visionsense_repo.repository_uri)
         CfnOutput(self, "HttpListenerArn", value=listener.listener_arn)
         CfnOutput(self, "AppTargetGroupArn", value=target_group.target_group_arn)
+        CfnOutput(self, "VisionSenseEcsServiceName", value=visionsense_service.service_name)
