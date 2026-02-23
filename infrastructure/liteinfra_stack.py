@@ -224,7 +224,7 @@ class LiteInfraStack(Stack):
             protocol=elbv2.ApplicationProtocol.HTTP,
             target_type=elbv2.TargetType.IP,
             health_check=elbv2.HealthCheck(
-                path="/health",
+                path="/",
                 port="80",
                 interval=Duration.seconds(30),
                 healthy_threshold_count=2,
@@ -276,6 +276,7 @@ class LiteInfraStack(Stack):
             security_groups=[ecs_sg],
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
             assign_public_ip=True,
+            circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True),
         )
 
         visionsense_target_group.add_target(

@@ -219,7 +219,7 @@ def test_visionsense_target_group_created():
             "Port": 80,
             "Protocol": "HTTP",
             "TargetType": "ip",
-            "HealthCheckPath": "/health",
+            "HealthCheckPath": "/",
             "HealthCheckIntervalSeconds": 30,
             "Matcher": {"HttpCode": "200"},
         },
